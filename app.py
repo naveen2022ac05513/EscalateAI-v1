@@ -79,8 +79,8 @@ with st.sidebar:
 if file:
     df = pd.read_excel(file)
 
-    # Normalize column names: Remove spaces, convert to lowercase for comparison
-    df.columns = df.columns.str.strip().str.lower()
+    # Normalize column names to remove leading/trailing spaces and convert to lowercase for comparison
+    df.columns = df.columns.str.strip().str.lower().str.replace(" +", " ", regex=True)
 
     required_cols = {"customer", "brief issue", "details", "issue reported date", "criticalness", "involved product", "owner", "status"}
     missing_cols = required_cols - set(df.columns)
