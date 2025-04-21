@@ -9,8 +9,12 @@ st.set_page_config(page_title="EscalateAI", layout="wide")
 # -------------------------------
 def analyze_issue(text):
     text_lower = text.lower()
-    sentiment = "Negative" if any(word in text_lower for word in ["delay", "not", "issue", "problem", "fail"]) else "Positive"
-    urgency = "High" if any(word in text_lower for word in ["urgent", "asap", "immediately", "critical"]) else "Low"
+    sentiment = "Negative" if any(
+        word in text_lower for word in ["delay", "not", "issue", "problem", "fail"]
+    ) else "Positive"
+    urgency = "High" if any(
+        word in text_lower for word in ["urgent", "asap", "immediately", "critical"]
+    ) else "Low"
     escalation = sentiment == "Negative" and urgency == "High"
     return sentiment, urgency, escalation
 
@@ -23,12 +27,14 @@ def log_case(row, sentiment, urgency, escalation):
     
     st.session_state.cases.append({
         "Customer": row["Customer"],
+        "Contact Person": row.get("Contact Person", "N/A"),
+        "Region/Pipe": row.get("Region/Pipe", "N/A"),
         "Brief Issue": row["Brief Issue"],
-        "Details": row.get("Details", ""),
-        "Criticalness": row.get("Criticalness", ""),
-        "Issue reported date": row.get("Issue reported date", ""),
-        "Involved Product": row.get("Involved Product", ""),
-        "Owner": row.get("Owner", ""),
+        "Details": row.get("Details", row.get("Action taken", "")),
+        "Criticalness": row.get("Criticalness", "N/A"),
+        "Issue reported date": row.get("Issue reported date", "N/A"),
+        "Involved Product": row.get("Involved Product", "N/A"),
+        "Owner": row.get("Owner", "N/A"),
         "Status": "Open",
         "Sentiment": sentiment,
         "Urgency": urgency,
@@ -50,6 +56,7 @@ def show_kanban():
             st.markdown(f"**🧾 {case['Customer']} - {case['Brief Issue']}**")
             st.write(f"🔹 Sentiment: `{case['Sentiment']}` | Urgency: `{case['Urgency']}`")
             st.write(f"📅 Reported: {case['Issue reported date']}")
+            st.write(f"👤 Contact: {case.get('Contact Person', 'N/A')} | 🌐 Region: {case.get('Region/Pipe', 'N/A')}")
             st.write(f"🛠 Product: {case['Involved Product']} | 👤 Owner: {case['Owner']}")
             new_status = st.selectbox(
                 "Update Status",
@@ -70,20 +77,26 @@ with st.sidebar:
 
 if file:
     df = pd.read_excel(file)
-    required_cols = {"Customer", "Brief Issue", "Details"}
+    # Validate that the essential columns exist.
+    required_cols = {"Customer", "Brief Issue", "Details", "Issue reported date"}
     if not required_cols.issubset(df.columns):
-        st.error("Excel must include at least 'Customer', 'Brief Issue', and 'Details' columns.")
+        st.error("Excel must include at least 'Customer', 'Brief Issue', 'Details', and 'Issue reported date' columns.")
     else:
+        # Create a selector for easy case selection.
         df["selector"] = df["Customer"].astype(str) + " | " + df["Brief Issue"].astype(str)
         selected = st.selectbox("Select Case", df["selector"])
         row = df[df["selector"] == selected].iloc[0]
 
         st.subheader("📄 Issue Details")
         st.write(f"**Customer:** {row['Customer']}")
+        st.write(f"**Contact Person:** {row.get('Contact Person', 'N/A')}")
+        st.write(f"**Region/Pipe:** {row.get('Region/Pipe', 'N/A')}")
         st.write(f"**Issue:** {row['Brief Issue']}")
-        st.write(f"**Details:** {row.get('Details', '')}")
-        st.write(f"**Reported Date:** {row.get('Issue reported date', '')}")
-        st.write(f"**Criticalness:** {row.get('Criticalness', '')}")
+        st.write(f"**Details:** {row.get('Details', 'N/A')}")
+        st.write(f"**Reported Date:** {row.get('Issue reported date', 'N/A')}")
+        st.write(f"**Criticalness:** {row.get('Criticalness', 'N/A')}")
+        st.write(f"**Involved Product:** {row.get('Involved Product', 'N/A')}")
+        st.write(f"**Owner:** {row.get('Owner', 'N/A')}")
 
         if st.button("🔍 Analyze & Log Escalation"):
             combined_text = str(row["Brief Issue"]) + " " + str(row.get("Details", ""))
