@@ -1,11 +1,7 @@
 import streamlit as st
 
-# Placeholder for EscalateAI interface
-st.title("EscalateAI - Customer Escalation Management")
-st.write("Welcome to the escalation tool. Here we track, predict, and manage customer escalations.")
-
-# Add more functionality as needed
-import streamlit as st
+# 🛠 Must be first Streamlit command
+st.set_page_config(page_title="EscalateAI", layout="wide")
 
 # -------------------------------
 # Simulated Email Fetching
@@ -39,7 +35,7 @@ def analyze_email(content):
 # Simulated Slack-style Alert
 # -------------------------------
 def send_alert(message):
-    st.write(f"🔔 *Slack alert sent:* {message}")  # Replace with actual Slack integration if needed
+    st.write(f"🔔 *Simulated Slack alert sent:* {message}")  # Replace with actual Slack API if needed
 
 # -------------------------------
 # Logging and Kanban Tracking
@@ -69,13 +65,12 @@ def show_kanban():
             st.markdown("----")
             st.markdown(f"**🧾 {case['subject']}**")
             st.write(f"Sentiment: `{case['sentiment']}` | Urgency: `{case['urgency']}`")
-            new_status = st.selectbox("Status", ["Open", "In Progress", "Resolved"], index=["Open", "In Progress", "Resolved"].index(case["status"]), key=case["subject"])
+            new_status = st.selectbox("Update Status", ["Open", "In Progress", "Resolved"], index=["Open", "In Progress", "Resolved"].index(case["status"]), key=case["subject"])
             case["status"] = new_status
 
 # -------------------------------
 # Streamlit App Layout
 # -------------------------------
-st.set_page_config(page_title="EscalateAI", layout="wide")
 st.title("🚨 EscalateAI - Customer Escalation Management")
 
 emails = fetch_emails()
