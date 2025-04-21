@@ -1,0 +1,7 @@
+import streamlit as st
+
+# Placeholder for EscalateAI interface
+st.title("EscalateAI - Customer Escalation Management")
+st.write("Welcome to the escalation tool. Here we track, predict, and manage customer escalations.")
+
+# Add more functionality as needed
