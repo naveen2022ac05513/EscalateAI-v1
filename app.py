@@ -1,92 +1,98 @@
 import streamlit as st
+import pandas as pd
 
-# 🛠 Must be first Streamlit command
+# Must be first!
 st.set_page_config(page_title="EscalateAI", layout="wide")
 
 # -------------------------------
-# Simulated Email Fetching
+# Basic NLP Simulation
 # -------------------------------
-def fetch_emails():
-    return {
-        "High latency in dashboard": "Hi team, our dashboard is extremely slow. Please resolve this urgently.",
-        "Login issues": "Users can't log in since morning. It's affecting operations.",
-        "General feedback": "The new UI looks great. No issues so far."
-    }
+def analyze_issue(text):
+    text_lower = text.lower()
+    sentiment = "Negative" if any(word in text_lower for word in ["delay", "not", "issue", "problem", "fail"]) else "Positive"
+    urgency = "High" if any(word in text_lower for word in ["urgent", "asap", "immediately", "critical"]) else "Low"
+    escalation = sentiment == "Negative" and urgency == "High"
+    return sentiment, urgency, escalation
 
 # -------------------------------
-# NLP Analysis (Basic)
+# Logging & Kanban
 # -------------------------------
-def analyze_email(content):
-    sentiment = "Negative" if "slow" in content or "can't" in content else "Positive"
-    urgency = "High" if "urgent" in content or "affecting" in content else "Low"
-    escalation_triggered = sentiment == "Negative" and urgency == "High"
-
-    if escalation_triggered:
-        st.warning("🚨 Escalation Detected! Alerting team...")
-        send_alert(content)
-
-    return {
-        "sentiment": sentiment,
-        "urgency": urgency,
-        "escalation": escalation_triggered
-    }
-
-# -------------------------------
-# Simulated Slack-style Alert
-# -------------------------------
-def send_alert(message):
-    st.write(f"🔔 *Simulated Slack alert sent:* {message}")  # Replace with actual Slack API if needed
-
-# -------------------------------
-# Logging and Kanban Tracking
-# -------------------------------
-def log_case(subject, content, result):
-    if "escalations" not in st.session_state:
-        st.session_state.escalations = []
-
-    st.session_state.escalations.append({
-        "subject": subject,
-        "content": content,
-        "sentiment": result["sentiment"],
-        "urgency": result["urgency"],
-        "status": "Open"
+def log_case(row, sentiment, urgency, escalation):
+    if "cases" not in st.session_state:
+        st.session_state.cases = []
+    
+    st.session_state.cases.append({
+        "Customer": row["Customer"],
+        "Brief Issue": row["Brief Issue"],
+        "Details": row.get("Details", ""),
+        "Criticalness": row.get("Criticalness", ""),
+        "Issue reported date": row.get("Issue reported date", ""),
+        "Involved Product": row.get("Involved Product", ""),
+        "Owner": row.get("Owner", ""),
+        "Status": "Open",
+        "Sentiment": sentiment,
+        "Urgency": urgency,
+        "Escalated": escalation,
     })
 
 def show_kanban():
-    if "escalations" not in st.session_state or not st.session_state.escalations:
+    if "cases" not in st.session_state or not st.session_state.cases:
         st.info("No escalations logged yet.")
         return
 
+    st.subheader("📌 Escalation Kanban Board")
     cols = st.columns(3)
-    status_cols = {"Open": cols[0], "In Progress": cols[1], "Resolved": cols[2]}
+    stages = {"Open": cols[0], "In Progress": cols[1], "Resolved": cols[2]}
 
-    for case in st.session_state.escalations:
-        with status_cols[case["status"]]:
+    for i, case in enumerate(st.session_state.cases):
+        with stages[case["Status"]]:
             st.markdown("----")
-            st.markdown(f"**🧾 {case['subject']}**")
-            st.write(f"Sentiment: `{case['sentiment']}` | Urgency: `{case['urgency']}`")
-            new_status = st.selectbox("Update Status", ["Open", "In Progress", "Resolved"], index=["Open", "In Progress", "Resolved"].index(case["status"]), key=case["subject"])
-            case["status"] = new_status
+            st.markdown(f"**🧾 {case['Customer']} - {case['Brief Issue']}**")
+            st.write(f"🔹 Sentiment: `{case['Sentiment']}` | Urgency: `{case['Urgency']}`")
+            st.write(f"📅 Reported: {case['Issue reported date']}")
+            st.write(f"🛠 Product: {case['Involved Product']} | 👤 Owner: {case['Owner']}")
+            new_status = st.selectbox(
+                "Update Status",
+                ["Open", "In Progress", "Resolved"],
+                index=["Open", "In Progress", "Resolved"].index(case["Status"]),
+                key=f"{i}_status"
+            )
+            st.session_state.cases[i]["Status"] = new_status
 
 # -------------------------------
-# Streamlit App Layout
+# Main App
 # -------------------------------
-st.title("🚨 EscalateAI - Customer Escalation Management")
-
-emails = fetch_emails()
+st.title("🚨 EscalateAI - Excel-Powered Escalation Management")
 
 with st.sidebar:
-    st.header("📥 Incoming Emails")
-    selected_email = st.selectbox("Select an Email", emails.keys())
+    st.header("📥 Upload Escalation Tracker")
+    file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
-    if selected_email:
-        content = emails[selected_email]
-        st.write(content)
+if file:
+    df = pd.read_excel(file)
+    required_cols = {"Customer", "Brief Issue", "Details"}
+    if not required_cols.issubset(df.columns):
+        st.error("Excel must include at least 'Customer', 'Brief Issue', and 'Details' columns.")
+    else:
+        df["selector"] = df["Customer"].astype(str) + " | " + df["Brief Issue"].astype(str)
+        selected = st.selectbox("Select Case", df["selector"])
+        row = df[df["selector"] == selected].iloc[0]
+
+        st.subheader("📄 Issue Details")
+        st.write(f"**Customer:** {row['Customer']}")
+        st.write(f"**Issue:** {row['Brief Issue']}")
+        st.write(f"**Details:** {row.get('Details', '')}")
+        st.write(f"**Reported Date:** {row.get('Issue reported date', '')}")
+        st.write(f"**Criticalness:** {row.get('Criticalness', '')}")
 
         if st.button("🔍 Analyze & Log Escalation"):
-            result = analyze_email(content)
-            log_case(selected_email, content, result)
-            st.success("Escalation logged successfully!")
+            combined_text = str(row["Brief Issue"]) + " " + str(row.get("Details", ""))
+            sentiment, urgency, escalated = analyze_issue(combined_text)
+            log_case(row, sentiment, urgency, escalated)
+            if escalated:
+                st.warning("🚨 Escalation Triggered!")
+            else:
+                st.success("Logged without escalation.")
 
-st.header("📌 Escalation Kanban Board")
+# Show Kanban board
 show_kanban()
