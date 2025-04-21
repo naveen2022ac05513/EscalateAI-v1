@@ -1,21 +1,25 @@
 import streamlit as st
 import pandas as pd
 
-# Must be first!
+# Configure Page
 st.set_page_config(page_title="EscalateAI", layout="wide")
 
 # -------------------------------
-# Basic NLP Simulation
+# NLP-Based Issue Analysis
 # -------------------------------
 def analyze_issue(text):
     text_lower = text.lower()
-    sentiment = "Negative" if any(word in text_lower for word in ["delay", "not", "issue", "problem", "fail"]) else "Positive"
-    urgency = "High" if any(word in text_lower for word in ["urgent", "asap", "immediately", "critical"]) else "Low"
+    sentiment = "Negative" if any(
+        word in text_lower for word in ["delay", "issue", "problem", "fail", "disatisfaction"]
+    ) else "Positive"
+    urgency = "High" if any(
+        word in text_lower for word in ["urgent", "critical", "immediately", "business impact"]
+    ) else "Low"
     escalation = sentiment == "Negative" and urgency == "High"
     return sentiment, urgency, escalation
 
 # -------------------------------
-# Logging & Kanban
+# Logging Escalations
 # -------------------------------
 def log_case(row, sentiment, urgency, escalation):
     if "cases" not in st.session_state:
@@ -23,12 +27,15 @@ def log_case(row, sentiment, urgency, escalation):
     
     st.session_state.cases.append({
         "Customer": row["Customer"],
+        "Region/Pipe": row.get("Region/Pipe", "N/A"),
+        "Contact Person": row.get("Contact Person", "N/A"),
+        "Criticalness": row.get("Criticalness", "N/A"),
+        "Issue reported date": row.get("Issue reported date", "N/A"),
         "Brief Issue": row["Brief Issue"],
-        "Details": row.get("Details", ""),
-        "Criticalness": row.get("Criticalness", ""),
-        "Issue reported date": row.get("Issue reported date", ""),
-        "Involved Product": row.get("Involved Product", ""),
-        "Owner": row.get("Owner", ""),
+        "Involved Product": row.get("Involved Product", "N/A"),
+        "Action taken": row.get("Action taken", "N/A"),
+        "Owner": row.get("Owner", "N/A"),
+        "Customer Facing": row.get("Customer Facing", "N/A"),
         "Status": "Open",
         "Sentiment": sentiment,
         "Urgency": urgency,
@@ -49,8 +56,9 @@ def show_kanban():
             st.markdown("----")
             st.markdown(f"**🧾 {case['Customer']} - {case['Brief Issue']}**")
             st.write(f"🔹 Sentiment: `{case['Sentiment']}` | Urgency: `{case['Urgency']}`")
-            st.write(f"📅 Reported: {case['Issue reported date']}")
+            st.write(f"📅 Reported: {case['Issue reported date']} | 🌐 Region: {case.get('Region/Pipe', 'N/A')}")
             st.write(f"🛠 Product: {case['Involved Product']} | 👤 Owner: {case['Owner']}")
+            st.write(f"🔹 Criticalness: `{case.get('Criticalness', 'N/A')}` | 🏢 Contact: {case.get('Contact Person', 'N/A')}")
             new_status = st.selectbox(
                 "Update Status",
                 ["Open", "In Progress", "Resolved"],
@@ -60,9 +68,9 @@ def show_kanban():
             st.session_state.cases[i]["Status"] = new_status
 
 # -------------------------------
-# Main App
+# Main App Logic
 # -------------------------------
-st.title("🚨 EscalateAI - Excel-Powered Escalation Management")
+st.title("🚨 EscalateAI - Intelligent Escalation Management")
 
 with st.sidebar:
     st.header("📥 Upload Escalation Tracker")
@@ -70,20 +78,21 @@ with st.sidebar:
 
 if file:
     df = pd.read_excel(file)
-    required_cols = {"Customer", "Brief Issue", "Details"}
-    if not required_cols.issubset(df.columns):
-        st.error("Excel must include at least 'Customer', 'Brief Issue', and 'Details' columns.")
+    available_columns = set(df.columns)
+
+    mandatory_fields = {"Customer", "Brief Issue", "Details", "Issue reported date", "Criticalness", "Involved Product", "Owner", "Status"}
+    missing_cols = mandatory_fields - available_columns
+
+    if missing_cols:
+        st.error(f"Missing required columns: {', '.join(missing_cols)}")
     else:
         df["selector"] = df["Customer"].astype(str) + " | " + df["Brief Issue"].astype(str)
         selected = st.selectbox("Select Case", df["selector"])
         row = df[df["selector"] == selected].iloc[0]
 
         st.subheader("📄 Issue Details")
-        st.write(f"**Customer:** {row['Customer']}")
-        st.write(f"**Issue:** {row['Brief Issue']}")
-        st.write(f"**Details:** {row.get('Details', '')}")
-        st.write(f"**Reported Date:** {row.get('Issue reported date', '')}")
-        st.write(f"**Criticalness:** {row.get('Criticalness', '')}")
+        for col in df.columns:
+            st.write(f"**{col}:** {row.get(col, 'N/A')}")
 
         if st.button("🔍 Analyze & Log Escalation"):
             combined_text = str(row["Brief Issue"]) + " " + str(row.get("Details", ""))
