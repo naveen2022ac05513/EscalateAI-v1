@@ -26,17 +26,12 @@ def log_case(row, sentiment, urgency, escalation):
         st.session_state.cases = []
     
     st.session_state.cases.append({
-        "Customer": row["customer"],
-        "Region/Pipe": row.get("region/pipe", "N/A"),
-        "Contact Person": row.get("contact person", "N/A"),
-        "Criticalness": row.get("criticalness", "N/A"),
-        "Issue Reported Date": row.get("issue reported date", "N/A"),
         "Brief Issue": row["brief issue"],
-        "Involved Product": row.get("involved product", "N/A"),
+        "Customer": row.get("customer", "N/A"),
+        "Reported Date": row.get("issue reported date", "N/A"),
         "Action Taken": row.get("action taken", "N/A"),
         "Owner": row.get("owner", "N/A"),
-        "Customer Facing": row.get("customer facing", "N/A"),
-        "Status": "Open",
+        "Status": row.get("status", "Open"),
         "Sentiment": sentiment,
         "Urgency": urgency,
         "Escalated": escalation,
@@ -54,11 +49,10 @@ def show_kanban():
     for i, case in enumerate(st.session_state.cases):
         with stages[case["Status"]]:
             st.markdown("----")
-            st.markdown(f"**🧾 {case['Customer']} - {case['Brief Issue']}**")
+            st.markdown(f"**🧾 Issue: {case['Brief Issue']}**")
             st.write(f"🔹 Sentiment: `{case['Sentiment']}` | Urgency: `{case['Urgency']}`")
-            st.write(f"📅 Reported: {case['Issue Reported Date']} | 🌐 Region: {case.get('Region/Pipe', 'N/A')}")
-            st.write(f"🛠 Product: {case['Involved Product']} | 👤 Owner: {case['Owner']}")
-            st.write(f"🔹 Criticalness: `{case.get('Criticalness', 'N/A')}` | 🏢 Contact: {case.get('Contact Person', 'N/A')}")
+            st.write(f"📅 Reported: {case['Reported Date']} | 👤 Owner: {case.get('Owner', 'N/A')}")
+            st.write(f"✅ Action Taken: {case.get('Action Taken', 'N/A')}")
             new_status = st.selectbox(
                 "Update Status",
                 ["Open", "In Progress", "Resolved"],
@@ -70,7 +64,7 @@ def show_kanban():
 # ---------------------------------
 # Main App Logic
 # ---------------------------------
-st.title("🚨 EscalateAI - Intelligent Escalation Management")
+st.title("🚨 EscalateAI - Generic Escalation Tracking")
 
 with st.sidebar:
     st.header("📥 Upload Escalation Tracker")
@@ -79,16 +73,16 @@ with st.sidebar:
 if file:
     df = pd.read_excel(file)
 
-    # Normalize column names to remove leading/trailing spaces and convert to lowercase for comparison
+    # Normalize column names: Remove extra spaces, convert to lowercase for comparison
     df.columns = df.columns.str.strip().str.lower().str.replace(" +", " ", regex=True)
 
-    required_cols = {"customer", "brief issue", "details", "issue reported date", "criticalness", "involved product", "owner", "status"}
+    required_cols = {"brief issue"}
     missing_cols = required_cols - set(df.columns)
 
     if missing_cols:
-        st.error(f"Missing required columns: {', '.join(missing_cols)}")
+        st.error("The uploaded Excel file must contain at least an 'Issue' column.")
     else:
-        df["selector"] = df["customer"].astype(str) + " | " + df["brief issue"].astype(str)
+        df["selector"] = df["brief issue"].astype(str)
         selected = st.selectbox("Select Case", df["selector"])
         row = df[df["selector"] == selected].iloc[0]
 
@@ -97,8 +91,7 @@ if file:
             st.write(f"**{col.capitalize()}:** {row.get(col, 'N/A')}")
 
         if st.button("🔍 Analyze & Log Escalation"):
-            combined_text = str(row["brief issue"]) + " " + str(row.get("details", ""))
-            sentiment, urgency, escalated = analyze_issue(combined_text)
+            sentiment, urgency, escalated = analyze_issue(row["brief issue"])
             log_case(row, sentiment, urgency, escalated)
             if escalated:
                 st.warning("🚨 Escalation Triggered!")
