@@ -1,102 +1,158 @@
-import streamlit as st
-import pandas as pd
+# EscalateAI.py
+# High-level implementation outline for EscalateAI with Outlook email fetching every hour
 
-# Set Page Configuration
-st.set_page_config(page_title="EscalateAI", layout="wide")
+import uuid
+import smtplib
+import datetime
+import os
+import json
+from typing import List, Dict
+from collections import defaultdict
 
-# ---------------------------------
-# NLP-Based Issue Analysis
-# ---------------------------------
-def analyze_issue(text):
-    text_lower = text.lower()
-    sentiment = "Negative" if any(
-        word in text_lower for word in ["delay", "issue", "problem", "fail", "dissatisfaction"]
-    ) else "Positive"
-    urgency = "High" if any(
-        word in text_lower for word in ["urgent", "critical", "immediately", "business impact"]
-    ) else "Low"
-    escalation = sentiment == "Negative" and urgency == "High"
-    return sentiment, urgency, escalation
+from transformers import pipeline
+from sklearn.externals import joblib  # for saving/loading models
+from fastapi import FastAPI
+from pydantic import BaseModel
+from starlette.responses import JSONResponse
+import uvicorn
 
-# ---------------------------------
-# Logging Escalations
-# ---------------------------------
-def log_case(row, sentiment, urgency, escalation):
-    if "cases" not in st.session_state:
-        st.session_state.cases = []
-    
-    st.session_state.cases.append({
-        "Brief Issue": row["brief issue"],
-        "Customer": row.get("customer", "N/A"),
-        "Reported Date": row.get("issue reported date", "N/A"),
-        "Action Taken": row.get("action taken", "N/A"),
-        "Owner": row.get("owner", "N/A"),
-        "Status": row.get("status", "Open"),
-        "Sentiment": sentiment,
-        "Urgency": urgency,
-        "Escalated": escalation,
-    })
+from msal import ConfidentialClientApplication
+import requests
+from apscheduler.schedulers.blocking import BlockingScheduler
 
-def show_kanban():
-    if "cases" not in st.session_state or not st.session_state.cases:
-        st.info("No escalations logged yet.")
-        return
+# === Configuration === #
+ESCALATION_ID_PREFIX = "SESICE-"
+DATA_FILE = "escalations_db.json"
+CLIENT_ID = 8df1bf10-bf08-4ce9-8078-c387d17aa785
+CLIENT_SECRET = 169948a0-3581-449d-9d8c-f4f54160465d
+TENANT_ID = f8cdef31-a31e-4b4a-93e4-5f571e91255a
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+SCOPE = ["https://graph.microsoft.com/.default"]
+USER_LIST = [
+    'user1@example.com', 'user2@example.com', # add all ~500 users
+]
 
-    st.subheader("📌 Escalation Kanban Board")
-    cols = st.columns(3)
-    stages = {"Open": cols[0], "In Progress": cols[1], "Resolved": cols[2]}
+# === NLP Analysis === #
+sentiment_classifier = pipeline("sentiment-analysis")
+urgency_keywords = ["urgent", "immediately", "critical", "asap", "severely"]
 
-    for i, case in enumerate(st.session_state.cases):
-        with stages[case["Status"]]:
-            st.markdown("----")
-            st.markdown(f"**🧾 Issue: {case['Brief Issue']}**")
-            st.write(f"🔹 Sentiment: `{case['Sentiment']}` | Urgency: `{case['Urgency']}`")
-            st.write(f"📅 Reported: {case['Reported Date']} | 👤 Owner: {case.get('Owner', 'N/A')}")
-            st.write(f"✅ Action Taken: {case.get('Action Taken', 'N/A')}")
-            new_status = st.selectbox(
-                "Update Status",
-                ["Open", "In Progress", "Resolved"],
-                index=["Open", "In Progress", "Resolved"].index(case["Status"]),
-                key=f"{i}_status"
-            )
-            st.session_state.cases[i]["Status"] = new_status
 
-# ---------------------------------
-# Main App Logic
-# ---------------------------------
-st.title("🚨 EscalateAI - Generic Escalation Tracking")
+def analyze_email(email_body: str):
+    sentiment = sentiment_classifier(email_body)[0]
+    urgency = any(word in email_body.lower() for word in urgency_keywords)
+    escalation_trigger = "yes" if urgency or sentiment['label'] == "NEGATIVE" else "no"
+    return {
+        "sentiment": sentiment,
+        "urgency": urgency,
+        "trigger": escalation_trigger
+    }
 
-with st.sidebar:
-    st.header("📥 Upload Escalation Tracker")
-    file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# === Escalation Logging === #
+def generate_escalation_id():
+    return ESCALATION_ID_PREFIX + str(uuid.uuid4().int)[:5]
 
-if file:
-    df = pd.read_excel(file)
 
-    # Normalize column names: Remove extra spaces, convert to lowercase for comparison
-    df.columns = df.columns.str.strip().str.lower().str.replace(" +", " ", regex=True)
-
-    required_cols = {"brief issue"}
-    missing_cols = required_cols - set(df.columns)
-
-    if missing_cols:
-        st.error("The uploaded Excel file must contain at least an 'Issue' column.")
+def log_escalation(data):
+    if not os.path.exists(DATA_FILE):
+        db = []
     else:
-        df["selector"] = df["brief issue"].astype(str)
-        selected = st.selectbox("Select Case", df["selector"])
-        row = df[df["selector"] == selected].iloc[0]
+        with open(DATA_FILE, "r") as f:
+            db = json.load(f)
+    db.append(data)
+    with open(DATA_FILE, "w") as f:
+        json.dump(db, f, indent=2)
 
-        st.subheader("📄 Issue Details")
-        for col in df.columns:
-            st.write(f"**{col.capitalize()}:** {row.get(col, 'N/A')}")
+# === Outlook Integration via Microsoft Graph API === #
+def get_access_token():
+    app = ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=AUTHORITY,
+        client_credential=CLIENT_SECRET
+    )
+    result = app.acquire_token_for_client(scopes=SCOPE)
+    return result['access_token']
 
-        if st.button("🔍 Analyze & Log Escalation"):
-            sentiment, urgency, escalated = analyze_issue(row["brief issue"])
-            log_case(row, sentiment, urgency, escalated)
-            if escalated:
-                st.warning("🚨 Escalation Triggered!")
-            else:
-                st.success("Logged without escalation.")
 
-# Show Kanban board
-show_kanban()
+def fetch_emails_for_user(user_email, access_token):
+    url = f"https://graph.microsoft.com/v1.0/users/{user_email}/mailFolders/inbox/messages?$top=10"
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Accept': 'application/json'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        emails = response.json().get('value', [])
+        for mail in emails:
+            body = mail.get('body', {}).get('content', '')
+            analysis = analyze_email(body)
+            if analysis['trigger'] == 'yes':
+                escalation_id = generate_escalation_id()
+                record = {
+                    "id": escalation_id,
+                    "subject": mail.get('subject', 'No Subject'),
+                    "body": body,
+                    "sender": user_email,
+                    "date": mail.get('receivedDateTime', str(datetime.datetime.now())),
+                    "analysis": analysis
+                }
+                log_escalation(record)
+    else:
+        print(f"Error fetching emails for {user_email}: {response.text}")
+
+
+def fetch_emails_for_all_users():
+    access_token = get_access_token()
+    for email in USER_LIST:
+        fetch_emails_for_user(email, access_token)
+
+# Schedule email fetch every hour
+scheduler = BlockingScheduler()
+scheduler.add_job(fetch_emails_for_all_users, 'interval', hours=1)
+
+# === FastAPI App === #
+app = FastAPI()
+
+
+class EmailInput(BaseModel):
+    subject: str
+    body: str
+    sender: str
+    date: str
+
+
+@app.post("/parse_email")
+def parse_email(input: EmailInput):
+    analysis = analyze_email(input.body)
+    if analysis['trigger'] == 'yes':
+        escalation_id = generate_escalation_id()
+        record = {
+            "id": escalation_id,
+            "subject": input.subject,
+            "body": input.body,
+            "sender": input.sender,
+            "date": input.date,
+            "analysis": analysis
+        }
+        log_escalation(record)
+        return JSONResponse({"message": "Escalation logged", "id": escalation_id})
+    else:
+        return JSONResponse({"message": "No escalation detected"})
+
+# === Run Server and Scheduler === #
+if __name__ == "__main__":
+    import threading
+
+    def run_api():
+        uvicorn.run("EscalateAI:app", host="0.0.0.0", port=8000, reload=True)
+
+    t = threading.Thread(target=run_api)
+    t.start()
+    scheduler.start()
+
+# === TODO / Next Features === #
+# - Kanban UI with Streamlit or React frontend
+# - Real-time alerts using WebSocket / email notifications
+# - Predictive models for proactive escalation handling
+# - Feedback loop for continuous learning
+# - Multi-user access and collaboration interface
+# - Integration with internal CRMs / case tracking tools
