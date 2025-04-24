@@ -1,5 +1,3 @@
 pandas
 openpyxl
-streamlit==<version>
-pandas==<version>
-plotly==<version>
+
