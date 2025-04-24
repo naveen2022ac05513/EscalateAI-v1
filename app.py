@@ -2,13 +2,12 @@ import uuid
 import pandas as pd
 import streamlit as st
 from datetime import datetime
-import plotly.express as px
 
 # Initialization
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
 st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
 
-# Admin Credentials (you can replace these with a secure authentication method later)
+# Admin Credentials
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "password123"
 
@@ -130,14 +129,6 @@ if escalation_data:
     
     # Display Data Table
     st.dataframe(df, width=1000, height=400)
-    
-    # Graphics: Urgency Distribution
-    fig = px.pie(df, names="Urgency", title="Urgency Distribution")
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Graphics: Status Distribution
-    status_fig = px.bar(df, x="Status", title="Status Distribution")
-    st.plotly_chart(status_fig, use_container_width=True)
 
 else:
     st.info("No escalations added yet. Use the sidebar to add manual entries or upload data.")
