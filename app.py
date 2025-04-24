@@ -6,9 +6,9 @@ import requests
 from datetime import datetime
 
 # Microsoft Graph API Credentials (Replace with actual credentials)
-CLIENT_ID = "your-client-id"
-TENANT_ID = "your-tenant-id"
-CLIENT_SECRET = "your-client-secret"
+CLIENT_ID = 8df1bf10-bf08-4ce9-8078-c387d17aa785
+CLIENT_SECRET = 169948a0-3581-449d-9d8c-f4f54160465d
+TENANT_ID = f8cdef31-a31e-4b4a-93e4-5f571e91255a
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
 
