@@ -1,157 +1,100 @@
 import uuid
 import pandas as pd
 import streamlit as st
+import msal
+import requests
 from datetime import datetime
-import threading
-import time
 
-# Initialization
+# Microsoft Graph API Credentials (Replace with actual credentials)
+CLIENT_ID = "your-client-id"
+TENANT_ID = "your-tenant-id"
+CLIENT_SECRET = "your-client-secret"
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
+
+# Admin Dashboard
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
 st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
 
-# Admin Credentials
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "password123"
+# Monitored Email List
+if "monitored_emails" not in st.session_state:
+    st.session_state["monitored_emails"] = []
 
-# Email ID Configuration
-monitored_emails = ["user1@example.com", "user2@example.com"]  # Placeholder for initial email list
-
-# Escalation Data Storage
-escalation_data = []
+# Bulk Upload Email IDs
+st.sidebar.header("📂 Upload Email IDs")
+uploaded_file = st.sidebar.file_uploader("Upload CSV file", type=["csv"])
+if uploaded_file:
+    try:
+        email_df = pd.read_csv(uploaded_file)
+        if "Email ID" in email_df.columns:
+            st.session_state["monitored_emails"] = email_df["Email ID"].tolist()
+            st.sidebar.success(f"Updated monitored emails ({len(st.session_state['monitored_emails'])})")
+        else:
+            st.sidebar.error("CSV file must contain 'Email ID' column.")
+    except Exception as e:
+        st.sidebar.error(f"Error processing file: {e}")
 
 # Generate Unique Escalation ID
 def generate_escalation_id():
     return f"ESC-{str(uuid.uuid4())[:8].upper()}"
 
-# Function to Prevent Duplicate Issues
-def is_duplicate(issue):
-    return any(row["Issue"].lower() == issue.lower() for row in escalation_data)
+# Authenticate with Microsoft Graph API
+def get_access_token():
+    app = msal.ConfidentialClientApplication(CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET)
+    token_response = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
+    return token_response.get("access_token", None)
 
-# Simulated Email Fetching
-def fetch_emails_from_monitored():
-    emails = []
-    for email_id in monitored_emails[:10]:  # Simulating fetching emails from the first 10 IDs
-        emails.append({
-            "Customer Name": email_id.split("@")[0],
-            "Issue": f"Issue reported by {email_id}",
-            "Urgency": "High",
-            "Status": "New",
-            "Owner": "Admin",
-            "Date": datetime.now()
-        })
-    return emails
+# Fetch Emails from Employee Inboxes
+def fetch_emails():
+    access_token = get_access_token()
+    if not access_token:
+        st.error("Failed to retrieve authentication token.")
+        return []
 
-# Process Emails Periodically
-def process_emails_periodically():
-    while True:
-        emails = fetch_emails_from_monitored()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get(GRAPH_API_URL, headers=headers)
+
+    if response.status_code == 200:
+        emails = response.json()["value"]
+        escalation_data = []
+
         for email in emails:
-            if not is_duplicate(email["Issue"]):
-                escalation_id = generate_escalation_id()
+            sender = email["sender"]["emailAddress"]["address"]
+            subject = email["subject"]
+            received_date = email["receivedDateTime"]
+
+            if sender in st.session_state["monitored_emails"]:  # Filter monitored users
                 escalation_data.append({
-                    "Escalation ID": escalation_id,
-                    "Customer Name": email["Customer Name"],
-                    "Issue": email["Issue"],
-                    "Urgency": email["Urgency"],
-                    "Status": email["Status"],
-                    "Date": email["Date"],
-                    "Owner": email["Owner"]
+                    "Escalation ID": generate_escalation_id(),
+                    "Customer Name": sender.split("@")[0],
+                    "Issue": subject,
+                    "Urgency": "High",
+                    "Status": "New",
+                    "Date": received_date,
+                    "Owner": "Admin"
                 })
-        time.sleep(300)  # Fetch emails every 5 minutes
-
-# Run Background Email Fetching
-if "email_thread" not in st.session_state:
-    st.session_state["email_thread"] = threading.Thread(target=process_emails_periodically, daemon=True)
-    st.session_state["email_thread"].start()
-
-# Admin Authentication
-if "admin_authenticated" not in st.session_state:
-    st.session_state["admin_authenticated"] = False
-
-def admin_login():
-    username = st.sidebar.text_input("Admin Username", key="admin_username")
-    password = st.sidebar.text_input("Admin Password", type="password", key="admin_password")
-    if st.sidebar.button("Login"):
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            st.sidebar.success("Admin authenticated successfully!")
-            st.session_state["admin_authenticated"] = True
-        else:
-            st.sidebar.error("Invalid admin credentials!")
-
-# Email Configuration by Admin
-if st.session_state["admin_authenticated"]:
-    st.sidebar.header("📬 Configure Monitored Emails")
-    email_list = st.sidebar.text_area("Enter email IDs (comma-separated):", ", ".join(monitored_emails))
-    if st.sidebar.button("Update Email List"):
-        monitored_emails = [email.strip() for email in email_list.split(",") if email.strip()]
-        st.sidebar.success(f"Updated monitored email IDs. Total: {len(monitored_emails)}")
-else:
-    st.sidebar.header("Admin Login")
-    admin_login()
-
-# Manual Entry Form
-st.sidebar.header("📋 Add Escalation")
-customer_name = st.sidebar.text_input("Customer Name")
-issue = st.sidebar.text_area("Issue Description")
-urgency = st.sidebar.selectbox("Urgency Level", ["Normal", "Urgent", "High", "Critical"])
-owner = st.sidebar.text_input("Owner")
-status = st.sidebar.selectbox("Status", ["New", "In Progress", "Escalated", "Resolved"])
-entry_date = st.sidebar.date_input("Date", datetime.now())
-
-if st.sidebar.button("Add Escalation"):
-    if customer_name and issue and owner:
-        if not is_duplicate(issue):
-            escalation_id = generate_escalation_id()
-            escalation_data.append({
-                "Escalation ID": escalation_id,
-                "Customer Name": customer_name,
-                "Issue": issue,
-                "Urgency": urgency,
-                "Status": status,
-                "Date": entry_date,
-                "Owner": owner
-            })
-            st.sidebar.success(f"Escalation ID: {escalation_id} added successfully!")
-        else:
-            st.sidebar.error("Duplicate issue detected! Please verify.")
+        return escalation_data
     else:
-        st.sidebar.error("Please fill out all required fields.")
+        st.error(f"Error fetching emails: {response.status_code}")
+        return []
 
-# File Upload for Bulk Escalation
-st.sidebar.header("📂 Upload Escalations (Excel)")
-uploaded_file = st.sidebar.file_uploader("Choose an Excel file", type=["xlsx"])
-if uploaded_file:
-    try:
-        uploaded_data = pd.read_excel(uploaded_file)
-        if all(col in uploaded_data.columns for col in ["Customer Name", "Issue", "Urgency", "Status", "Date", "Owner"]):
-            for _, row in uploaded_data.iterrows():
-                if not is_duplicate(row["Issue"]):
-                    escalation_id = generate_escalation_id()
-                    escalation_data.append({
-                        "Escalation ID": escalation_id,
-                        "Customer Name": row["Customer Name"],
-                        "Issue": row["Issue"],
-                        "Urgency": row["Urgency"],
-                        "Status": row["Status"],
-                        "Date": row["Date"],
-                        "Owner": row["Owner"]
-                    })
-            st.sidebar.success("Escalation data uploaded successfully!")
-        else:
-            st.sidebar.error("File must contain the columns: Customer Name, Issue, Urgency, Status, Date, Owner.")
-    except Exception as e:
-        st.sidebar.error(f"Error reading file: {e}")
+# Fetch Escalations Button
+if st.sidebar.button("Fetch Escalations"):
+    escalations = fetch_emails()
+    if escalations:
+        st.session_state["escalation_data"] = escalations
+        st.sidebar.success("Fetched escalation emails successfully!")
 
 # Escalation Dashboard
 st.subheader("🗂️ Escalation Dashboard")
-if escalation_data:
-    df = pd.DataFrame(escalation_data)
+if "escalation_data" in st.session_state:
+    df = pd.DataFrame(st.session_state["escalation_data"])
     
     # Download Option
-    @st.cache
+    @st.cache_data
     def convert_to_csv(dataframe):
         return dataframe.to_csv(index=False).encode('utf-8')
-    
+
     csv = convert_to_csv(df)
     st.download_button(
         label="Download Escalation Data",
@@ -159,21 +102,15 @@ if escalation_data:
         file_name="escalations.csv",
         mime="text/csv"
     )
-    
-    # Display Data Table
+
+    # Display Escalation Data Table
     st.dataframe(df, width=1000, height=400)
 
-else:
-    st.info("No escalations added yet. Emails will be fetched every 5 minutes.")
-
-# Escalation Insights and Metrics
-st.markdown("### Escalation Insights")
-if escalation_data:
+    # Metrics Insights
     st.metric(label="Total Escalations", value=len(df))
     st.metric(label="High Urgency", value=len(df[df['Urgency'] == "High"]))
-    st.metric(label="Critical Issues", value=len(df[df['Urgency'] == "Critical"]))
 else:
-    st.info("Metrics will appear once data is added.")
+    st.info("No escalations added yet. Click 'Fetch Escalations' in sidebar.")
 
 st.markdown("---")
 st.caption("© 2025 EscalateAI - Enhanced Escalation Management Dashboard")
