@@ -7,22 +7,21 @@ from datetime import datetime
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
-# Download VADER lexicon
-nltk.download('vader_lexicon')
+# Initialize VADER for sentiment analysis
+nltk.download('vader_lexicon', quiet=True)
 analyzer = SentimentIntensityAnalyzer()
 
-# Microsoft Graph API Setup
-	CLIENT_ID = "8df1bf10-bf08-4ce9-8078-c387d17aa785"
-	CLIENT_SECRET = "169948a0-3581-449d-9d8c-f4f54160465d"
-	TENANT_ID = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
-
+# Microsoft Graph API Setup (replace with your credentials)
+CLIENT_ID = "your-client-id"
+CLIENT_SECRET = "your-client-secret"
+TENANT_ID = "your-tenant-id"
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
 
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
 st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
 
-# Utilities
+# Load session state
 def generate_escalation_id():
     return f"ESC-{str(uuid.uuid4())[:8].upper()}"
 
@@ -35,19 +34,18 @@ def load_escalation_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
-# Load session state
 if "escalation_data" not in st.session_state:
     st.session_state["escalation_data"] = load_escalation_data()
 
 if "monitored_emails" not in st.session_state:
     st.session_state["monitored_emails"] = []
 
-# ---------------- Sidebar Section ----------------
+# ---------------- Sidebar: Admin Management ----------------
 
 st.sidebar.header("📥 Admin Panel")
 
-# Email ID entry (manual)
-st.sidebar.subheader("➕ Add Email ID to Monitor")
+# Manual entry of monitored email ID
+st.sidebar.subheader("➕ Add Monitored Email ID")
 new_email = st.sidebar.text_input("Enter Email ID")
 if st.sidebar.button("Add Email"):
     if new_email and new_email not in st.session_state["monitored_emails"]:
@@ -61,6 +59,7 @@ if email_file:
     if "Email ID" in df_emails.columns:
         new_emails = df_emails["Email ID"].dropna().tolist()
         st.session_state["monitored_emails"].extend(new_emails)
+        st.session_state["monitored_emails"] = list(set(st.session_state["monitored_emails"]))  # Remove duplicates
         st.sidebar.success(f"{len(new_emails)} email IDs added")
     else:
         st.sidebar.error("CSV must contain a column named 'Email ID'")
@@ -112,17 +111,18 @@ if uploaded_escalations:
     except Exception as e:
         st.sidebar.error(f"Failed to process file: {e}")
 
-# ---------------- Dashboard Section ----------------
+# ---------------- Dashboard ----------------
 
 st.subheader("🗂️ Escalation Dashboard")
 df = st.session_state["escalation_data"]
 if not df.empty:
     st.metric("Total Escalations", len(df))
     st.metric("Negative Sentiments", len(df[df['Status'] == "Negative"]))
-    st.download_button("Download Data", df.to_csv(index=False), "escalations.csv", "text/csv")
+    st.download_button("Download Escalation Data", df.to_csv(index=False), "escalations.csv", "text/csv")
     st.dataframe(df, use_container_width=True)
 else:
     st.info("No escalations found. Add manually or upload via sidebar.")
 
 st.markdown("---")
-st.caption("© 2025 EscalateAI")
+st.caption("© 2025 EscalateAI - Enhanced Escalation Management")
+``
