@@ -246,4 +246,11 @@ if "escalation_data" in st.session_state:
         label="Download Escalation Data",
         data=csv,
         file_name="escalations.csv",
-       
+        mime="text/csv"
+    )
+
+    # Display Data
+    st.dataframe(df)
+
+else:
+    st.write("No escalations found.")
