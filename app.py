@@ -33,6 +33,56 @@ if "escalation_data" not in st.session_state:
 if "monitored_emails" not in st.session_state:
     st.session_state["monitored_emails"] = []
 
+# Sidebar for Email ID Management (Manual Entry & Bulk Upload)
+st.sidebar.header("📧 Manage Monitored Email IDs")
+
+# Manual Entry of Email ID
+new_email_id = st.sidebar.text_input("Enter Email ID to Monitor")
+if st.sidebar.button("Add Email ID"):
+    if new_email_id:
+        st.session_state["monitored_emails"].append(new_email_id)
+        st.sidebar.success(f"Email ID '{new_email_id}' added to monitored list.")
+        save_monitored_emails()
+    else:
+        st.sidebar.error("Please enter a valid email ID.")
+
+# Bulk Upload of Email IDs (via Excel)
+st.sidebar.header("📂 Upload Email IDs (Excel)")
+uploaded_email_file = st.sidebar.file_uploader("Upload Excel file with Email IDs", type=["xlsx"])
+if uploaded_email_file:
+    try:
+        email_df = pd.read_excel(uploaded_email_file)
+        if "Email ID" in email_df.columns:
+            email_list = email_df["Email ID"].tolist()
+            st.session_state["monitored_emails"].extend(email_list)
+            st.sidebar.success(f"{len(email_list)} email IDs uploaded successfully!")
+            save_monitored_emails()
+        else:
+            st.sidebar.error("Excel file must contain 'Email ID' column.")
+    except Exception as e:
+        st.sidebar.error(f"Error processing file: {e}")
+
+# Save monitored emails to a file for persistence
+def save_monitored_emails():
+    try:
+        with open("monitored_emails.txt", "w") as f:
+            for email in st.session_state["monitored_emails"]:
+                f.write(f"{email}\n")
+    except Exception as e:
+        st.error(f"Error saving email IDs: {e}")
+
+# Function to load monitored emails
+def load_monitored_emails():
+    try:
+        with open("monitored_emails.txt", "r") as f:
+            return [line.strip() for line in f.readlines()]
+    except Exception as e:
+        return []
+
+# Load monitored emails at the start
+if "monitored_emails" not in st.session_state:
+    st.session_state["monitored_emails"] = load_monitored_emails()
+
 # Sidebar for Escalation Entry
 st.sidebar.header("📂 Manual Escalation Entry")
 customer_name = st.sidebar.text_input("Customer Name")
@@ -87,11 +137,9 @@ def get_access_token():
         app = msal.ConfidentialClientApplication(CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET)
         token_response = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
         
-        # Check if token is acquired
         if "access_token" in token_response:
             return token_response["access_token"]
         else:
-            # Print full error response for debugging
             st.error(f"Token acquisition failed. Response: {token_response}")
             return None
     except Exception as e:
@@ -117,7 +165,7 @@ def fetch_emails():
             subject = email["subject"]
             received_date = email["receivedDateTime"]
 
-            if sender in st.session_state["monitored_emails"]:  # Filter monitored users
+            if sender in st.session_state["monitored_emails"]:
                 escalation_data.append({
                     "Escalation ID": generate_escalation_id(),
                     "Customer Name": sender.split("@")[0],
@@ -169,3 +217,4 @@ else:
 
 st.markdown("---")
 st.caption("© 2025 EscalateAI - Enhanced Escalation Management Dashboard")
+
