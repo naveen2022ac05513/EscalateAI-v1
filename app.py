@@ -16,7 +16,7 @@ GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
 st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
 
-# Load Escalations from CSV
+# Load and Save Escalation Data
 def load_escalation_data():
     try:
         return pd.read_csv("escalations.csv")
@@ -29,23 +29,47 @@ def save_escalation_data(df):
 if "escalation_data" not in st.session_state:
     st.session_state["escalation_data"] = load_escalation_data()
 
-# Monitored Email List
 if "monitored_emails" not in st.session_state:
     st.session_state["monitored_emails"] = []
 
-# Bulk Upload Email IDs
-st.sidebar.header("📂 Upload Email IDs")
-uploaded_file = st.sidebar.file_uploader("Upload CSV file", type=["csv"])
-if uploaded_file:
-    try:
-        email_df = pd.read_csv(uploaded_file)
-        if "Email ID" in email_df.columns:
-            st.session_state["monitored_emails"] = email_df["Email ID"].tolist()
-            st.sidebar.success(f"Updated monitored emails ({len(st.session_state['monitored_emails'])})")
+# Sidebar - Email Monitoring Management
+st.sidebar.header("📥 Email Monitoring Setup")
+
+# Manual entry
+with st.sidebar.form("manual_email_add"):
+    new_email = st.text_input("Add Monitored Email ID")
+    if st.form_submit_button("Add Email"):
+        if new_email and "@" in new_email:
+            if new_email not in st.session_state["monitored_emails"]:
+                st.session_state["monitored_emails"].append(new_email)
+                st.sidebar.success(f"{new_email} added.")
+            else:
+                st.sidebar.warning("Email already exists.")
         else:
-            st.sidebar.error("CSV file must contain 'Email ID' column.")
+            st.sidebar.error("Please enter a valid email.")
+
+# Bulk upload
+email_file = st.sidebar.file_uploader("📁 Upload CSV with 'Email ID'", type=["csv"])
+if email_file:
+    try:
+        email_df = pd.read_csv(email_file)
+        if "Email ID" in email_df.columns:
+            uploaded_emails = email_df["Email ID"].dropna().tolist()
+            added_count = 0
+            for email in uploaded_emails:
+                if email not in st.session_state["monitored_emails"]:
+                    st.session_state["monitored_emails"].append(email)
+                    added_count += 1
+            st.sidebar.success(f"{added_count} new emails added.")
+        else:
+            st.sidebar.error("CSV must include 'Email ID' column.")
     except Exception as e:
-        st.sidebar.error(f"Error processing file: {e}")
+        st.sidebar.error(f"Error reading file: {e}")
+
+# Show current list
+if st.session_state["monitored_emails"]:
+    st.sidebar.markdown("### 👁️‍🗨️ Currently Monitored Emails")
+    st.sidebar.write(pd.DataFrame(st.session_state["monitored_emails"], columns=["Email ID"]))
 
 # Generate Unique Escalation ID
 def generate_escalation_id():
@@ -80,7 +104,7 @@ def fetch_emails():
             subject = email["subject"]
             received_date = email["receivedDateTime"]
 
-            if sender in st.session_state["monitored_emails"]:  # Filter monitored users
+            if sender in st.session_state["monitored_emails"]:
                 escalation_data.append({
                     "Escalation ID": generate_escalation_id(),
                     "Customer Name": sender.split("@")[0],
@@ -95,84 +119,38 @@ def fetch_emails():
         st.error(f"Error fetching emails: {response.status_code}")
         return []
 
-# Fetch Escalations Button
-if st.sidebar.button("Fetch Escalations"):
+# Button to fetch and store escalations
+if st.sidebar.button("📩 Fetch Escalations from Email"):
     escalations = fetch_emails()
     if escalations:
-        st.session_state["escalation_data"] = escalations
-        save_escalation_data(pd.DataFrame(escalations))
-        st.sidebar.success("Escalations saved & retained!")
+        updated_df = pd.concat([pd.DataFrame(escalations), st.session_state["escalation_data"]], ignore_index=True)
+        st.session_state["escalation_data"] = updated_df
+        save_escalation_data(updated_df)
+        st.sidebar.success("Escalations updated successfully!")
 
 # Escalation Dashboard
 st.subheader("🗂️ Escalation Dashboard")
-if "escalation_data" in st.session_state:
-    df = pd.DataFrame(st.session_state["escalation_data"])
-    
-    # Download Option
+if not st.session_state["escalation_data"].empty:
+    df = st.session_state["escalation_data"]
+
     @st.cache_data
     def convert_to_csv(dataframe):
         return dataframe.to_csv(index=False).encode('utf-8')
 
     csv = convert_to_csv(df)
     st.download_button(
-        label="Download Escalation Data",
+        label="📤 Download Escalation Data",
         data=csv,
         file_name="escalations.csv",
         mime="text/csv"
     )
 
-    # Display Escalation Data Table
-    st.dataframe(df, width=1000, height=400)
+    st.dataframe(df, use_container_width=True)
 
-    # Metrics Insights
     st.metric(label="Total Escalations", value=len(df))
-    st.metric(label="High Urgency", value=len(df[df['Urgency'] == "High"]))
+    st.metric(label="High Urgency", value=len(df[df["Urgency"] == "High"]))
 else:
-    st.info("No escalations added yet. Click 'Fetch Escalations' in sidebar.")
+    st.info("No escalations found yet. Click 'Fetch Escalations from Email' to begin.")
 
 st.markdown("---")
 st.caption("© 2025 EscalateAI - Enhanced Escalation Management Dashboard")
-st.sidebar.header("📝 Manually Log Escalation")
-with st.sidebar.form("manual_escalation_form"):
-    customer_name = st.text_input("Customer Name")
-    issue = st.text_area("Issue Description")
-    urgency = st.selectbox("Urgency", ["High", "Medium", "Low"])
-    owner = st.text_input("Owner", value="Admin")
-    submitted = st.form_submit_button("Add Escalation")
-
-    if submitted:
-        new_entry = {
-            "Escalation ID": generate_escalation_id(),
-            "Customer Name": customer_name,
-            "Issue": issue,
-            "Urgency": urgency,
-            "Status": "New",
-            "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Owner": owner
-        }
-        st.session_state["escalation_data"].append(new_entry)
-        save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
-        st.sidebar.success("Escalation added successfully!")
-st.sidebar.header("📤 Upload Escalations (Excel)")
-excel_file = st.sidebar.file_uploader("Upload .xlsx file", type=["xlsx"])
-if excel_file:
-    try:
-        xls_df = pd.read_excel(excel_file)
-        required_cols = {"Customer Name", "Issue", "Urgency", "Owner"}
-        if required_cols.issubset(set(xls_df.columns)):
-            for _, row in xls_df.iterrows():
-                st.session_state["escalation_data"].append({
-                    "Escalation ID": generate_escalation_id(),
-                    "Customer Name": row["Customer Name"],
-                    "Issue": row["Issue"],
-                    "Urgency": row["Urgency"],
-                    "Status": "New",
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Owner": row["Owner"]
-                })
-            save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
-            st.sidebar.success(f"{len(xls_df)} escalations uploaded from Excel.")
-        else:
-            st.sidebar.error("Excel must contain: Customer Name, Issue, Urgency, Owner")
-    except Exception as e:
-        st.sidebar.error(f"Error processing Excel file: {e}")
