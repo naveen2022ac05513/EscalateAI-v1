@@ -114,11 +114,30 @@ uploaded_excel = st.sidebar.file_uploader("Upload Excel file", type=["xlsx"])
 if uploaded_excel:
     try:
         excel_df = pd.read_excel(uploaded_excel)
-        required_columns = ["Customer Name", "Issue", "Urgency", "Status", "Owner"]
+
+        # Columns to be used for escalations
+        required_columns = [
+            "Sno", "Customer", "Region/Pipe", "Contact Person", "Contact Details", "BU/Activity", 
+            "Criticalness", "Issue reported date", "Brief Issue", "Involved Product", 
+            "Action taken", "Support reqd", "Key Topics", "Owner", "Customer Facing", "Status", 
+            "Date of Closure"
+        ]
         
+        # Check if the required columns exist in the uploaded Excel sheet
         if all(col in excel_df.columns for col in required_columns):
+            # Process the Excel data and create escalations
             excel_df["Escalation ID"] = [generate_escalation_id() for _ in range(len(excel_df))]
             excel_df["Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Mapping columns to standard escalation fields
+            excel_df["Customer Name"] = excel_df["Customer"]
+            excel_df["Issue"] = excel_df["Brief Issue"]
+            excel_df["Urgency"] = excel_df["Criticalness"]
+            excel_df["Owner"] = excel_df["Owner"]
+            excel_df["Status"] = excel_df["Status"]
+            excel_df["Date"] = excel_df["Date"]
+
+            # Add escalations to session state
             st.session_state["escalation_data"].extend(excel_df.to_dict(orient="records"))
             save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
             st.sidebar.success(f"{len(excel_df)} escalations uploaded successfully!")
@@ -217,4 +236,3 @@ else:
 
 st.markdown("---")
 st.caption("© 2025 EscalateAI - Enhanced Escalation Management Dashboard")
-
