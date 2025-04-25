@@ -4,6 +4,7 @@ import streamlit as st
 import msal
 import requests
 from datetime import datetime
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 # Microsoft Graph API Credentials (Replace with actual credentials)
 CLIENT_ID = "8df1bf10-bf08-4ce9-8078-c387d17aa785"
@@ -11,6 +12,9 @@ CLIENT_SECRET = "169948a0-3581-449d-9d8c-f4f54160465d"
 TENANT_ID = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
+
+# Sentiment Analysis Setup (using VADER)
+analyzer = SentimentIntensityAnalyzer()
 
 # Admin Dashboard Setup
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
@@ -101,6 +105,7 @@ if st.sidebar.button("Add Manual Escalation"):
             "Status": status,
             "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Owner": owner,
+            "Sentiment": analyze_sentiment(issue)
         }
         st.session_state["escalation_data"].append(new_escalation)
         save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
@@ -115,36 +120,54 @@ if uploaded_excel:
     try:
         excel_df = pd.read_excel(uploaded_excel)
 
-        # Columns to be used for escalations
-        required_columns = [
-            "Sno", "Customer", "Region/Pipe", "Contact Person", "Contact Details", "BU/Activity", 
-            "Criticalness", "Issue reported date", "Brief Issue", "Involved Product", 
-            "Action taken", "Support reqd", "Key Topics", "Owner", "Customer Facing", "Status", 
-            "Date of Closure"
-        ]
-        
-        # Check if the required columns exist in the uploaded Excel sheet
-        if all(col in excel_df.columns for col in required_columns):
-            # Process the Excel data and create escalations
+        # Dynamically Detect Columns (using substring matching)
+        columns_map = {
+            "Customer": None,
+            "Issue": None,
+            "Criticalness": None,
+            "Status": None,
+            "Owner": None,
+            "Date of Closure": None
+        }
+
+        # Detect and map columns dynamically based on keywords
+        for col in excel_df.columns:
+            for key in columns_map:
+                if key.lower() in col.lower():
+                    columns_map[key] = col
+                    break
+
+        # Check if necessary columns exist
+        if None in columns_map.values():
+            st.sidebar.error(f"Missing necessary columns in Excel. Ensure the following are present: {', '.join(columns_map.keys())}")
+        else:
+            # Process Excel data
             excel_df["Escalation ID"] = [generate_escalation_id() for _ in range(len(excel_df))]
             excel_df["Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # Mapping columns to standard escalation fields
-            excel_df["Customer Name"] = excel_df["Customer"]
-            excel_df["Issue"] = excel_df["Brief Issue"]
-            excel_df["Urgency"] = excel_df["Criticalness"]
-            excel_df["Owner"] = excel_df["Owner"]
-            excel_df["Status"] = excel_df["Status"]
-            excel_df["Date"] = excel_df["Date"]
+            # Map detected columns
+            excel_df["Customer Name"] = excel_df[columns_map["Customer"]]
+            excel_df["Issue"] = excel_df[columns_map["Issue"]]
+            excel_df["Urgency"] = excel_df[columns_map["Criticalness"]]
+            excel_df["Owner"] = excel_df[columns_map["Owner"]]
+            excel_df["Status"] = excel_df[columns_map["Status"]]
+            excel_df["Sentiment"] = excel_df[columns_map["Issue"]].apply(analyze_sentiment)
 
             # Add escalations to session state
             st.session_state["escalation_data"].extend(excel_df.to_dict(orient="records"))
             save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
             st.sidebar.success(f"{len(excel_df)} escalations uploaded successfully!")
-        else:
-            st.sidebar.error(f"Excel file must contain the columns: {', '.join(required_columns)}")
     except Exception as e:
         st.sidebar.error(f"Error processing file: {e}")
+
+# Sentiment Analysis Function
+def analyze_sentiment(text):
+    sentiment_score = analyzer.polarity_scores(text)
+    # If the sentiment score is negative, return negative sentiment
+    if sentiment_score["compound"] <= -0.05:
+        return "Negative"
+    else:
+        return "Neutral/Positive"
 
 # Generate Unique Escalation ID
 def generate_escalation_id():
@@ -192,7 +215,8 @@ def fetch_emails():
                     "Urgency": "High",
                     "Status": "New",
                     "Date": received_date,
-                    "Owner": "Admin"
+                    "Owner": "Admin",
+                    "Sentiment": analyze_sentiment(subject)
                 })
         return escalation_data
     else:
@@ -222,17 +246,4 @@ if "escalation_data" in st.session_state:
         label="Download Escalation Data",
         data=csv,
         file_name="escalations.csv",
-        mime="text/csv"
-    )
-
-    # Display Escalation Data Table
-    st.dataframe(df, width=1000, height=400)
-
-    # Metrics Insights
-    st.metric(label="Total Escalations", value=len(df))
-    st.metric(label="High Urgency", value=len(df[df['Urgency'] == "High"]))
-else:
-    st.info("No escalations added yet. Click 'Fetch Escalations' in sidebar.")
-
-st.markdown("---")
-st.caption("© 2025 EscalateAI - Enhanced Escalation Management Dashboard")
+       
