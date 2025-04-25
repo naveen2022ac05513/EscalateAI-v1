@@ -33,7 +33,7 @@ if "escalation_data" not in st.session_state:
 if "monitored_emails" not in st.session_state:
     st.session_state["monitored_emails"] = []
 
-# Manual Escalation Entry
+# Sidebar for Escalation Entry
 st.sidebar.header("📂 Manual Escalation Entry")
 customer_name = st.sidebar.text_input("Customer Name")
 issue = st.sidebar.text_area("Issue Description")
@@ -58,17 +58,22 @@ if st.sidebar.button("Add Manual Escalation"):
     else:
         st.sidebar.error("Please fill in all fields!")
 
-# Bulk Upload Email IDs
-st.sidebar.header("📂 Upload Email IDs (CSV)")
-uploaded_file = st.sidebar.file_uploader("Upload CSV file", type=["csv"])
-if uploaded_file:
+# Sidebar for Bulk Upload of Escalations (via Excel)
+st.sidebar.header("📂 Upload Escalations (Excel)")
+uploaded_excel = st.sidebar.file_uploader("Upload Excel file", type=["xlsx"])
+if uploaded_excel:
     try:
-        email_df = pd.read_csv(uploaded_file)
-        if "Email ID" in email_df.columns:
-            st.session_state["monitored_emails"] = email_df["Email ID"].tolist()
-            st.sidebar.success(f"Updated monitored emails ({len(st.session_state['monitored_emails'])})")
+        excel_df = pd.read_excel(uploaded_excel)
+        required_columns = ["Customer Name", "Issue", "Urgency", "Status", "Owner"]
+        
+        if all(col in excel_df.columns for col in required_columns):
+            excel_df["Escalation ID"] = [generate_escalation_id() for _ in range(len(excel_df))]
+            excel_df["Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.session_state["escalation_data"].extend(excel_df.to_dict(orient="records"))
+            save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
+            st.sidebar.success(f"{len(excel_df)} escalations uploaded successfully!")
         else:
-            st.sidebar.error("CSV file must contain 'Email ID' column.")
+            st.sidebar.error(f"Excel file must contain the columns: {', '.join(required_columns)}")
     except Exception as e:
         st.sidebar.error(f"Error processing file: {e}")
 
