@@ -1,223 +1,162 @@
+import uuid
+import pandas as pd
+import streamlit as st
 import msal
 import requests
-import sqlite3
-import smtplib
-import streamlit as st
-import pandas as pd
+from datetime import datetime
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import sqlite3
 
+# Microsoft Graph API Credentials (Replace with actual credentials)
+CLIENT_ID = "8df1bf10-bf08-4ce9-8078-c387d17aa785"
+CLIENT_SECRET = "169948a0-3581-449d-9d8c-f4f54160465d"
+TENANT_ID = "f8cdef31-a31e-4b4a-93e4-5f571e91255a"
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
 
-# 1. **Outlook Email Parsing using Microsoft Graph API**
+# Admin Dashboard Setup
+st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
+st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
 
-def authenticate_graph_api(client_id, tenant_id, client_secret):
-    authority = f"https://login.microsoftonline.com/{tenant_id}"
-    scope = ["https://graph.microsoft.com/.default"]
-    app = msal.ConfidentialClientApplication(client_id, authority=authority, client_credential=client_secret)
-    result = app.acquire_token_for_client(scopes=scope)
-    
-    if "access_token" in result:
-        return result["access_token"]
-    else:
-        raise Exception("Authentication failed.")
+# Initialize SQLite Database for Escalations
+conn = sqlite3.connect('escalations.db')
+cursor = conn.cursor()
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS escalations (
+        escalation_id TEXT PRIMARY KEY,
+        customer_name TEXT,
+        issue TEXT,
+        urgency TEXT,
+        status TEXT,
+        date TEXT,
+        owner TEXT,
+        criticality TEXT
+    )
+''')
+conn.commit()
 
-def get_emails_from_outlook(access_token):
-    url = "https://graph.microsoft.com/v1.0/me/messages"
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        return response.json().get("value", [])
-    else:
-        raise Exception(f"Error fetching emails: {response.status_code}")
+# Function to Save Escalation Data to DB
+def save_to_db(escalation_data):
+    cursor.executemany('''
+        INSERT OR REPLACE INTO escalations (escalation_id, customer_name, issue, urgency, status, date, owner, criticality)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', escalation_data)
+    conn.commit()
 
-def parse_emails(emails):
-    escalations = []
-    for email in emails:
-        subject = email.get("subject", "")
-        body = email.get("bodyPreview", "")
-        if "escalation" in subject.lower() or "urgent" in body.lower():
-            escalations.append({
-                "subject": subject,
-                "body": body,
-                "from": email.get("from", {}).get("emailAddress", {}).get("address", ""),
-            })
-    return escalations
+# Function to Load Escalation Data from DB
+def load_from_db():
+    cursor.execute('SELECT * FROM escalations WHERE status="Escalated"')
+    return cursor.fetchall()
 
-# 2. **NLP Analysis for Sentiment, Urgency, and Escalation Triggers**
-
+# Sentiment Analysis for Negative Sentiment
 def analyze_sentiment(issue):
     analyzer = SentimentIntensityAnalyzer()
     sentiment_score = analyzer.polarity_scores(issue)
     return sentiment_score['compound']
 
-def determine_urgency(sentiment_score):
-    if sentiment_score <= -0.5:
-        return "High"
-    elif sentiment_score <= -0.2:
-        return "Medium"
+# Generate Unique Escalation ID
+def generate_escalation_id():
+    return f"ESC-{str(uuid.uuid4())[:8].upper()}"
+
+# Authenticate with Microsoft Graph API
+def get_access_token():
+    try:
+        app = msal.ConfidentialClientApplication(CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET)
+        token_response = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
+        return token_response.get("access_token", None)
+    except Exception as e:
+        st.error(f"Error acquiring token: {e}")
+        return None
+
+# Fetch Emails from Employee Inboxes
+def fetch_emails():
+    access_token = get_access_token()
+    if not access_token:
+        st.error("Failed to retrieve authentication token.")
+        return []
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = requests.get(GRAPH_API_URL, headers=headers)
+
+    if response.status_code == 200:
+        emails = response.json()["value"]
+        escalation_data = []
+
+        for email in emails:
+            sender = email["sender"]["emailAddress"]["address"]
+            subject = email["subject"]
+            received_date = email["receivedDateTime"]
+
+            # Analyzing sentiment of the email subject (assuming this contains the issue)
+            sentiment_score = analyze_sentiment(subject)
+
+            # If negative sentiment detected, classify as Escalated
+            if sentiment_score < -0.5:
+                escalation_data.append((
+                    generate_escalation_id(),
+                    sender.split("@")[0],  # Customer name (extracted from email)
+                    subject,
+                    "High",
+                    "Escalated",
+                    received_date,
+                    "Admin",
+                    "Critical"
+                ))
+
+        return escalation_data
     else:
-        return "Low"
+        st.error(f"Error fetching emails: {response.status_code}")
+        return []
 
-def analyze_escalations(escalations):
-    for escalation in escalations:
-        sentiment_score = analyze_sentiment(escalation["body"])
-        urgency = determine_urgency(sentiment_score)
-        escalation["sentiment_score"] = sentiment_score
-        escalation["urgency"] = urgency
-    return escalations
-
-# 3. **Centralized Repository (SQLite)**
-
-def create_db_connection(db_file="escalations.db"):
-    return sqlite3.connect(db_file)
-
-def create_escalations_table(conn):
-    create_table_sql = """
-    CREATE TABLE IF NOT EXISTS escalations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        escalation_id TEXT,
-        customer_name TEXT,
-        issue TEXT,
-        sentiment_score REAL,
-        urgency TEXT,
-        status TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    conn.execute(create_table_sql)
-    conn.commit()
-
-def insert_escalation(conn, escalation):
-    insert_sql = """
-    INSERT INTO escalations (escalation_id, customer_name, issue, sentiment_score, urgency, status)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """
-    conn.execute(insert_sql, (escalation['escalation_id'], escalation['customer_name'], escalation['body'],
-                              escalation['sentiment_score'], escalation['urgency'], "New"))
-    conn.commit()
-
-def fetch_escalations(conn):
-    select_sql = "SELECT * FROM escalations"
-    cursor = conn.cursor()
-    cursor.execute(select_sql)
-    return cursor.fetchall()
-
-# 4. **Kanban Board and UI Enhancements using Streamlit**
-
-def display_kanban_board(df):
-    status_counts = df['Status'].value_counts()
-    st.subheader("Escalation Status Overview")
-    st.write(status_counts)
-
-    fig, ax = plt.subplots()
-    status_counts.plot(kind='bar', ax=ax)
-    ax.set_title("Escalation Status Distribution")
-    ax.set_xlabel("Status")
-    ax.set_ylabel("Count")
-    st.pyplot(fig)
-
-def display_escalations_table(df):
-    st.subheader("Escalations Table")
-    st.write(df)
-
-def get_example_data():
-    return pd.DataFrame({
-        "Escalation ID": ["SESICE-000001", "SESICE-000002", "SESICE-000003"],
-        "Customer Name": ["Customer A", "Customer B", "Customer C"],
-        "Issue": ["System down", "Service interruption", "High latency"],
-        "Sentiment Score": [-0.6, -0.3, -0.7],
-        "Urgency": ["High", "Normal", "High"],
-        "Status": ["New", "In Progress", "Resolved"]
-    })
-
-# 5. **Real-time Alerts and Notifications (using SMTP)**
-
-def send_email_notification(to_email, subject, body, smtp_server, smtp_port, smtp_user, smtp_password):
-    msg = MIMEMultipart()
-    msg['From'] = smtp_user
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_password)
-        text = msg.as_string()
-        server.sendmail(smtp_user, to_email, text)
-
-# 6. **Excel Upload for Bulk Escalations**
-
-uploaded_file = st.file_uploader("Upload an Excel file with Escalations", type="xlsx")
-
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-    st.write("Escalation Data", df)
-
-    # Sentiment Analysis
-    analyzer = SentimentIntensityAnalyzer()
-
-    def analyze_sentiment(issue):
-        sentiment = analyzer.polarity_scores(issue)
-        return sentiment['compound']  # Compound score for overall sentiment
-
-    df['Sentiment Score'] = df['Brief Issue'].apply(analyze_sentiment)
-
-    # Display escalations with sentiment scores
-    st.subheader("Escalations with Sentiment Analysis")
-    st.write(df)
-
-# 7. **Integrating All Components**
-
-def main():
-    st.title("EscalateAI - Escalation Management Dashboard")
-
-    # Fetch and display email escalations
-    client_id = st.text_input("Enter your Microsoft client ID")
-    tenant_id = st.text_input("Enter your Microsoft tenant ID")
-    client_secret = st.text_input("Enter your Microsoft client secret", type="password")
+# Sidebar Inputs for Admin: Manual Entry, Bulk Upload, and Email Parsing
+with st.sidebar:
+    st.header("📂 Escalation Entries")
     
-    if client_id and tenant_id and client_secret:
+    # Manual Escalation Entry
+    st.subheader("Manual Escalation Entry")
+    customer_name = st.text_input("Customer Name")
+    issue = st.text_area("Issue")
+    urgency = st.selectbox("Urgency", ["Low", "Medium", "High"])
+    criticality = st.selectbox("Criticality", ["Low", "Medium", "High"])
+    if st.button("Add Escalation"):
+        if customer_name and issue:
+            escalation_id = generate_escalation_id()
+            date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_to_db([(escalation_id, customer_name, issue, urgency, "New", date, "Admin", criticality)])
+            st.success(f"Escalation {escalation_id} added.")
+
+    # Bulk Upload for Escalations via Excel
+    st.subheader("Bulk Upload Escalations (Excel)")
+    uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+    if uploaded_file:
         try:
-            access_token = authenticate_graph_api(client_id, tenant_id, client_secret)
-            emails = get_emails_from_outlook(access_token)
-            escalations = parse_emails(emails)
-            analyzed_escalations = analyze_escalations(escalations)
-            st.subheader("Escalations from Outlook Emails")
-            st.write(analyzed_escalations)
+            df = pd.read_excel(uploaded_file)
+            for _, row in df.iterrows():
+                escalation_id = generate_escalation_id()
+                customer_name = row.get("Customer", "Unknown")
+                issue = row.get("Brief Issue", "No issue description")
+                urgency = row.get("Urgency", "Low")
+                criticality = row.get("Criticality", "Low")
+                date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_to_db([(escalation_id, customer_name, issue, urgency, "New", date, "Admin", criticality)])
+            st.success("Escalations successfully uploaded.")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error processing file: {e}")
+    
+    # Fetch Escalations from Emails
+    if st.button("Fetch Escalations from Emails"):
+        escalations = fetch_emails()
+        if escalations:
+            save_to_db(escalations)
+            st.sidebar.success("Escalations fetched and saved!")
 
-    # Database Operations
-    conn = create_db_connection()
-    create_escalations_table(conn)
+# Main Dashboard for Escalated Cases
+st.subheader("🗂️ Escalation Dashboard")
 
-    # Insert sample data
-    if st.button("Insert Escalation to Database"):
-        sample_escalation = {
-            "escalation_id": "SESICE-000001",
-            "customer_name": "Customer A",
-            "body": "System is down",
-            "sentiment_score": -0.6,
-            "urgency": "High"
-        }
-        insert_escalation(conn, sample_escalation)
-        st.success("Escalation inserted successfully!")
-
-    # Display Database Entries
-    if st.button("Fetch Escalations from Database"):
-        escalations_from_db = fetch_escalations(conn)
-        st.write(pd.DataFrame(escalations_from_db))
-
-    # Visualize Escalations in Kanban board
-    display_kanban_board(get_example_data())
-
-    # Display Escalation Details Table
-    display_escalations_table(get_example_data())
-
-# Run the Streamlit App
-if __name__ == "__main__":
-    main()
+# Load and display only Escalated cases
+escalated_cases = load_from_db()
+if escalated_cases:
+    df = pd.DataFrame(escalated_cases, columns=["Escalation ID", "Customer Name", "Issue", "Urgency", "Status", "Date", "Owner", "Criticality"])
+    st.dataframe(df)
+else:
+    st.info("No escalated cases available.")
