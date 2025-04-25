@@ -18,9 +18,11 @@ GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
 st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
 
-# Initialize SQLite Database for Escalations
+# Initialize SQLite Database for Escalations and Email List
 conn = sqlite3.connect('escalations.db')
 cursor = conn.cursor()
+
+# Create tables for escalations and email list if they do not exist
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS escalations (
         escalation_id TEXT PRIMARY KEY,
@@ -33,6 +35,11 @@ cursor.execute('''
         criticality TEXT
     )
 ''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS monitored_emails (
+        email_id TEXT PRIMARY KEY
+    )
+''')
 conn.commit()
 
 # Function to Save Escalation Data to DB
@@ -43,10 +50,23 @@ def save_to_db(escalation_data):
     ''', escalation_data)
     conn.commit()
 
+# Function to Save Monitored Emails to DB
+def save_emails_to_db(email_list):
+    cursor.executemany('''
+        INSERT OR REPLACE INTO monitored_emails (email_id)
+        VALUES (?)
+    ''', [(email,) for email in email_list])
+    conn.commit()
+
 # Function to Load Escalation Data from DB
 def load_from_db():
     cursor.execute('SELECT * FROM escalations WHERE status="Escalated"')
     return cursor.fetchall()
+
+# Function to Load Monitored Emails
+def load_monitored_emails():
+    cursor.execute('SELECT email_id FROM monitored_emails')
+    return [email[0] for email in cursor.fetchall()]
 
 # Sentiment Analysis for Negative Sentiment
 def analyze_sentiment(issue):
@@ -81,37 +101,60 @@ def fetch_emails():
     if response.status_code == 200:
         emails = response.json()["value"]
         escalation_data = []
+        monitored_emails = load_monitored_emails()
 
         for email in emails:
             sender = email["sender"]["emailAddress"]["address"]
-            subject = email["subject"]
-            received_date = email["receivedDateTime"]
+            if sender in monitored_emails:  # Only process emails from monitored addresses
+                subject = email["subject"]
+                received_date = email["receivedDateTime"]
 
-            # Analyzing sentiment of the email subject (assuming this contains the issue)
-            sentiment_score = analyze_sentiment(subject)
+                # Analyzing sentiment of the email subject (assuming this contains the issue)
+                sentiment_score = analyze_sentiment(subject)
 
-            # If negative sentiment detected, classify as Escalated
-            if sentiment_score < -0.5:
-                escalation_data.append((
-                    generate_escalation_id(),
-                    sender.split("@")[0],  # Customer name (extracted from email)
-                    subject,
-                    "High",
-                    "Escalated",
-                    received_date,
-                    "Admin",
-                    "Critical"
-                ))
+                # If negative sentiment detected, classify as Escalated
+                if sentiment_score < -0.5:
+                    escalation_data.append((
+                        generate_escalation_id(),
+                        sender.split("@")[0],  # Customer name (extracted from email)
+                        subject,
+                        "High",
+                        "Escalated",
+                        received_date,
+                        "Admin",
+                        "Critical"
+                    ))
 
         return escalation_data
     else:
         st.error(f"Error fetching emails: {response.status_code}")
         return []
 
-# Sidebar Inputs for Admin: Manual Entry, Bulk Upload, and Email Parsing
+# Sidebar Inputs for Admin: Email List Management, Manual Entry, Bulk Upload, and Email Parsing
 with st.sidebar:
     st.header("📂 Escalation Entries")
-    
+
+    # Manual Entry for Email List
+    st.subheader("Manual Email List Entry")
+    email_input = st.text_input("Enter Email ID (separate by commas)")
+    if st.button("Add Email IDs"):
+        if email_input:
+            email_list = [email.strip() for email in email_input.split(",")]
+            save_emails_to_db(email_list)
+            st.success("Email IDs added for monitoring.")
+
+    # Bulk Upload for Email List via Excel
+    st.subheader("Bulk Upload Email List (Excel)")
+    email_upload = st.file_uploader("Upload Excel File with Email IDs", type=["xlsx"])
+    if email_upload:
+        try:
+            df = pd.read_excel(email_upload)
+            email_list = df.iloc[:, 0].tolist()  # Assume the first column contains emails
+            save_emails_to_db(email_list)
+            st.success("Email list successfully uploaded.")
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
+
     # Manual Escalation Entry
     st.subheader("Manual Escalation Entry")
     customer_name = st.text_input("Customer Name")
@@ -142,7 +185,7 @@ with st.sidebar:
             st.success("Escalations successfully uploaded.")
         except Exception as e:
             st.error(f"Error processing file: {e}")
-    
+
     # Fetch Escalations from Emails
     if st.button("Fetch Escalations from Emails"):
         escalations = fetch_emails()
