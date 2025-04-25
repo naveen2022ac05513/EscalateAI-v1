@@ -125,4 +125,3 @@ else:
 
 st.markdown("---")
 st.caption("© 2025 EscalateAI - Enhanced Escalation Management")
-``
