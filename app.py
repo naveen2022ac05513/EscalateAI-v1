@@ -132,3 +132,47 @@ else:
 
 st.markdown("---")
 st.caption("© 2025 EscalateAI - Enhanced Escalation Management Dashboard")
+st.sidebar.header("📝 Manually Log Escalation")
+with st.sidebar.form("manual_escalation_form"):
+    customer_name = st.text_input("Customer Name")
+    issue = st.text_area("Issue Description")
+    urgency = st.selectbox("Urgency", ["High", "Medium", "Low"])
+    owner = st.text_input("Owner", value="Admin")
+    submitted = st.form_submit_button("Add Escalation")
+
+    if submitted:
+        new_entry = {
+            "Escalation ID": generate_escalation_id(),
+            "Customer Name": customer_name,
+            "Issue": issue,
+            "Urgency": urgency,
+            "Status": "New",
+            "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Owner": owner
+        }
+        st.session_state["escalation_data"].append(new_entry)
+        save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
+        st.sidebar.success("Escalation added successfully!")
+st.sidebar.header("📤 Upload Escalations (Excel)")
+excel_file = st.sidebar.file_uploader("Upload .xlsx file", type=["xlsx"])
+if excel_file:
+    try:
+        xls_df = pd.read_excel(excel_file)
+        required_cols = {"Customer Name", "Issue", "Urgency", "Owner"}
+        if required_cols.issubset(set(xls_df.columns)):
+            for _, row in xls_df.iterrows():
+                st.session_state["escalation_data"].append({
+                    "Escalation ID": generate_escalation_id(),
+                    "Customer Name": row["Customer Name"],
+                    "Issue": row["Issue"],
+                    "Urgency": row["Urgency"],
+                    "Status": "New",
+                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Owner": row["Owner"]
+                })
+            save_escalation_data(pd.DataFrame(st.session_state["escalation_data"]))
+            st.sidebar.success(f"{len(xls_df)} escalations uploaded from Excel.")
+        else:
+            st.sidebar.error("Excel must contain: Customer Name, Issue, Urgency, Owner")
+    except Exception as e:
+        st.sidebar.error(f"Error processing Excel file: {e}")
