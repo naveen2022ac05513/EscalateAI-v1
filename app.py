@@ -6,15 +6,28 @@ import requests
 from datetime import datetime
 
 # Microsoft Graph API Credentials (Replace with actual credentials)
-CLIENT_ID = 8df1bf10-bf08-4ce9-8078-c387d17aa785
-CLIENT_SECRET = 169948a0-3581-449d-9d8c-f4f54160465d
-TENANT_ID = f8cdef31-a31e-4b4a-93e4-5f571e91255a
+CLIENT_ID = "YOUR_CLIENT_ID"
+CLIENT_SECRET = "YOUR_CLIENT_SECRET"
+TENANT_ID = "YOUR_TENANT_ID"
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 GRAPH_API_URL = "https://graph.microsoft.com/v1.0/me/messages"
 
-# Admin Dashboard
+# Admin Dashboard Setup
 st.set_page_config(page_title="EscalateAI Dashboard", layout="wide")
 st.title("📊 EscalateAI - Enhanced Escalation Management Dashboard")
+
+# Load Escalations from CSV
+def load_escalation_data():
+    try:
+        return pd.read_csv("escalations.csv")
+    except FileNotFoundError:
+        return pd.DataFrame(columns=["Escalation ID", "Customer Name", "Issue", "Urgency", "Status", "Date", "Owner"])
+
+def save_escalation_data(df):
+    df.to_csv("escalations.csv", index=False)
+
+if "escalation_data" not in st.session_state:
+    st.session_state["escalation_data"] = load_escalation_data()
 
 # Monitored Email List
 if "monitored_emails" not in st.session_state:
@@ -83,7 +96,8 @@ if st.sidebar.button("Fetch Escalations"):
     escalations = fetch_emails()
     if escalations:
         st.session_state["escalation_data"] = escalations
-        st.sidebar.success("Fetched escalation emails successfully!")
+        save_escalation_data(pd.DataFrame(escalations))
+        st.sidebar.success("Escalations saved & retained!")
 
 # Escalation Dashboard
 st.subheader("🗂️ Escalation Dashboard")
