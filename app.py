@@ -53,9 +53,13 @@ def generate_escalation_id():
 
 # Authenticate with Microsoft Graph API
 def get_access_token():
-    app = msal.ConfidentialClientApplication(CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET)
-    token_response = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
-    return token_response.get("access_token", None)
+    try:
+        app = msal.ConfidentialClientApplication(CLIENT_ID, authority=AUTHORITY, client_credential=CLIENT_SECRET)
+        token_response = app.acquire_token_for_client(["https://graph.microsoft.com/.default"])
+        return token_response.get("access_token", None)
+    except Exception as e:
+        st.error(f"Error acquiring token: {e}")
+        return None
 
 # Fetch Emails from Employee Inboxes
 def fetch_emails():
